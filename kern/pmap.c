@@ -373,11 +373,30 @@ page_decref(struct PageInfo* pp)
 // Hint 3: look at inc/mmu.h for useful macros that manipulate page
 // table and page directory entries.
 //
+
+// 这个函数是从页表(jos中使用二级页表)中找到虚地址为va对应的页表项在二级页表中的地址
+// 这个地址需要返回一个虚地址
+// 页表中存的是实地址，需要进行一定的转换
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
 	// Fill this function in
-	return NULL;
+
+	pte_t *pgtable = &pgdir[PDX(va)];
+	if((*pgtable) == 0 && create == false) {
+		return NULL;
+	} else if((*pgtable) == 0) {
+		struct PageInfo *newTable = page_alloc(1);	// 传参数1 表示 获取page后初始化为0
+		if(newTable == NULL) {
+			return NULL;
+		} else {
+			*pgtable = page2pa(newTable) | PTE_U | PTE_P;
+			newTable->pp_ref++;
+		}
+		return (pte_t *)KADDR(((*pgtable) >> PGSHIFT) << PGSHIFT) + PTX(va);
+	} else {
+		return (pte_t *)KADDR(((*pgtable) >> PGSHIFT) << PGSHIFT) + PTX(va);
+	}
 }
 
 //
@@ -391,10 +410,18 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
 // mapped pages.
 //
 // Hint: the TA solution uses pgdir_walk
+
+// 这个函数做一个地址映射，映射的长度为size(它是4k的倍数)，虚地址为va，实地址为pa
+// 要做的其实就是在页表中插入相应的表项
 static void
 boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
 	// Fill this function in
+	pte_t *addr = pgdir_walk(pgdir, (void *)va, 1);
+	for (int i = 0; i < size / PGSIZE; i++) {
+		addr[i] = pa | perm | PTE_P;
+		pa += PGSIZE;
+	}
 }
 
 //
@@ -422,11 +449,32 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 // Hint: The TA solution is implemented using pgdir_walk, page_remove,
 // and page2pa.
 //
+
+// 这里是向页表中插入一个页表项的操作
+// 首先找到虚地址va对应的页表项的位置，如果该位置原来没有映射关系，那么就把新的映射关系插入其中即可
+// 但是 如果该位置原来就有映射关系，那么需要进行处理
+// 如果 这个映射关系对应的实地址就是我们当前要插入的映射的实地址，那么需要做的就是根据perm修改页表项中的flag
+// 如果 这个映射关系是其他的映射关系，那么我们调用page_remove来把它清除就好了，page_remove会修改其对应的page的
+//		pp_ref，如果pp_ref为0了，那么会将该页释放。
+// 当然，我们想到了不区分上面两种情况的方法，我们先把pp的pp_ref自增，然后在把该页表中原有的page调用page_remove
+// 		这样的话，就不会把pp对应的页给free掉了，那么上面两种情况就没有什么区别了
 int
 page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 {
 	// Fill this function in
-	return 0;
+	pte_t *pte_store = pgdir_walk(pgdir, va, 1);
+	if(pte_store == 0) {
+		return -E_NO_MEM;
+	} else {
+		pp->pp_ref++;	// 这就是注释中提到了不需要单独考虑重复插入页表项的关键，先自增pp_ref再调page_remove
+		if(*pte_store != 0) {
+			// 这意味着 页表中的该位置原来是映射了一个物理页的 我们需要把它释放
+			page_remove(pgdir, va);
+		}
+		tlb_invalidate(pgdir, va);
+		*pte_store = page2pa(pp) | perm | PTE_P;
+		return 0;
+	}
 }
 
 //
@@ -440,11 +488,24 @@ page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 //
 // Hint: the TA solution uses pgdir_walk and pa2page.
 //
+// 这个函数从页表中找到虚地址va对应的页表项，把页表项的地址保存到pte_store中
+// 返回va对应的实页的PageInfo
 struct PageInfo *
 page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
 	// Fill this function in
-	return NULL;
+	pte_t *ptaddr = pgdir_walk(pgdir, va, 0);
+	if(ptaddr == NULL) {
+		return NULL;
+	} else {
+		if(*ptaddr == 0) {
+			return NULL;
+		} else {
+			physaddr_t pa = (*ptaddr) >> PGSHIFT << PGSHIFT;
+			if(pte_store != NULL) *pte_store = ptaddr;
+			return pa2page(pa);
+		}
+	}
 }
 
 //
@@ -462,10 +523,18 @@ page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 // Hint: The TA solution is implemented using page_lookup,
 // 	tlb_invalidate, and page_decref.
 //
+// 从页表中删除一个映射关系
 void
 page_remove(pde_t *pgdir, void *va)
 {
 	// Fill this function in
+	pte_t *pte_store;
+	struct PageInfo *page = page_lookup(pgdir, va, &pte_store);
+	if(page != NULL) {
+		tlb_invalidate(pgdir, va);
+		page_decref(page);
+		*pte_store = 0;
+	}
 }
 
 //
