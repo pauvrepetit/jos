@@ -182,6 +182,11 @@ mem_init(void)
 	//    - pages itself -- kernel RW, user NONE
 	// Your code goes here:
 
+	// 将pages对应的物理地址映射到UPAGES这个虚拟地址的位置上
+	// pages本身是一个kernel virtual address，我们取它的实地址，然后做映射。
+	size_t roundup_pages_size = ROUNDUP(npages*sizeof(struct PageInfo), PGSIZE);
+	boot_map_region(kern_pgdir, UPAGES, roundup_pages_size, PADDR(pages), PTE_P | PTE_W);
+
 	//////////////////////////////////////////////////////////////////////
 	// Use the physical memory that 'bootstack' refers to as the kernel
 	// stack.  The kernel stack grows down from virtual address KSTACKTOP.
@@ -194,6 +199,9 @@ mem_init(void)
 	//     Permissions: kernel RW, user NONE
 	// Your code goes here:
 
+	// 把bootstack对应的物理地址映射到[KSTACKTOP-KSTKSIZE, KSTACKTOP)虚地址部分
+	boot_map_region(kern_pgdir, KSTACKTOP - KSTKSIZE, KSTKSIZE, PADDR(bootstack), PTE_P | PTE_W);
+
 	//////////////////////////////////////////////////////////////////////
 	// Map all of physical memory at KERNBASE.
 	// Ie.  the VA range [KERNBASE, 2^32) should map to
@@ -202,6 +210,9 @@ mem_init(void)
 	// we just set up the mapping anyway.
 	// Permissions: kernel RW, user NONE
 	// Your code goes here:
+
+	// 把虚拟地址[KERNBASE, 2^32)映射到实地址0开始的位置，需要注意一下计算的问题
+	boot_map_region(kern_pgdir, KERNBASE, -KERNBASE, 0, PTE_P | PTE_W);
 
 	// Check that the initial page directory has been set up correctly.
 	check_kern_pgdir();
@@ -377,6 +388,7 @@ page_decref(struct PageInfo* pp)
 // 这个函数是从页表(jos中使用二级页表)中找到虚地址为va对应的页表项在二级页表中的地址
 // 这个地址需要返回一个虚地址
 // 页表中存的是实地址，需要进行一定的转换
+// 这里的一级页表的flag标志位需要进行一定的设置 根据测试程序 应该为PTE_U | PTE_P | PTE_W
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
@@ -390,7 +402,7 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
 		if(newTable == NULL) {
 			return NULL;
 		} else {
-			*pgtable = page2pa(newTable) | PTE_U | PTE_P;
+			*pgtable = page2pa(newTable) | PTE_U | PTE_P | PTE_W;
 			newTable->pp_ref++;
 		}
 		return (pte_t *)KADDR(((*pgtable) >> PGSHIFT) << PGSHIFT) + PTX(va);
@@ -413,14 +425,18 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
 
 // 这个函数做一个地址映射，映射的长度为size(它是4k的倍数)，虚地址为va，实地址为pa
 // 要做的其实就是在页表中插入相应的表项
+// 这里不能够只调用一次pgdir_walk来得到二级页表的地址，然后从这个地址开始逐次+1进行操作
+// 因为一个二级页表能够保存的页的数量是一定的，可能会越界
 static void
 boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
 	// Fill this function in
-	pte_t *addr = pgdir_walk(pgdir, (void *)va, 1);
+	pte_t *addr;
 	for (int i = 0; i < size / PGSIZE; i++) {
-		addr[i] = pa | perm | PTE_P;
+		addr = pgdir_walk(pgdir, (void *)va, 1);
+		*addr = pa | perm;
 		pa += PGSIZE;
+		va += PGSIZE;
 	}
 }
 
