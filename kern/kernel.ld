@@ -50,10 +50,12 @@ SECTIONS
 	.bss : {
 		PROVIDE(edata = .);
 		*(.bss)
-		PROVIDE(end = .);
 		BYTE(0)
 	}
 
+	/* 这里做了一些修改,我们需要让end相对于4k对齐,不然的话,在boot_alloc中可能会有一些问题 */
+	. = ALIGN(0x1000);
+	PROVIDE(end = .);
 
 	/DISCARD/ : {
 		*(.eh_frame .note.GNU-stack)
