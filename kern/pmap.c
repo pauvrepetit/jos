@@ -204,9 +204,10 @@ mem_init(void)
 	//    - envs itself -- kernel RW, user NONE
 	// LAB 3: Your code here.
 	// 将进程信息块的列表映射到UENVS的位置
+	// 注意这里的权限问题
 
 	size_t roundup_envs_size = ROUNDUP(NENV * sizeof(struct Env), PGSIZE);
-	boot_map_region(kern_pgdir, UENVS, roundup_envs_size, PADDR(envs), PTE_P | PTE_W);
+	boot_map_region(kern_pgdir, UENVS, roundup_envs_size, PADDR(envs), PTE_P | PTE_U);
 
 	//////////////////////////////////////////////////////////////////////
 	// Use the physical memory that 'bootstack' refers to as the kernel
@@ -610,7 +611,39 @@ int
 user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 {
 	// LAB 3: Your code here.
+	// 首先,如果perm不包括PTE_U的话 那么肯定是不能访问的
+	// 然后,需要保证[va, va + len)全部在ULIM之下
+	if(!(perm & PTE_U)) {
+		user_mem_check_addr = (uintptr_t)va;
+		return -E_FAULT;
+	}
+	if((uint32_t)va > ULIM) {
+		user_mem_check_addr = (uintptr_t)va;
+		return -E_FAULT;
+	}
+	if((uint32_t)va + len > ULIM) {
+		user_mem_check_addr = ULIM;
+		return -E_FAULT;
+	}
 
+	// 至此,所有的内存都在ULIM以下,不存在内存超过允许的上界的情况
+	// 然后我们逐个的检查所有的页,值得注意的是,为了设置user_mem_check_addr的值,我们需要单独检查第一页的情况
+	// 因为va可能在第一页的中间位置,那么user_mem_check_addr应该设置为va的值而不是该页开始的地址
+	void *roundDownVa = (void *)ROUNDDOWN(va, PGSIZE);
+	size_t roundSize = ROUNDUP(va + len, PGSIZE) - roundDownVa;
+	int i = 0;
+	pde_t *pgdir = env->env_pgdir;
+	if(((*pgdir_walk(pgdir, roundDownVa, 0)) & (perm | PTE_P)) != (perm | PTE_P)) {
+		user_mem_check_addr = (uintptr_t)va;
+		return -E_FAULT;
+	}
+	for(i = 1; i < roundSize >> PGSHIFT; i++) {
+		roundDownVa += PGSIZE;
+		if(((*pgdir_walk(pgdir, roundDownVa, 0)) & (perm | PTE_P)) != (perm | PTE_P)) {
+			user_mem_check_addr = (uintptr_t)roundDownVa;
+			return -E_FAULT;
+		}
+	}
 	return 0;
 }
 

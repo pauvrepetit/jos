@@ -69,7 +69,10 @@ trap_init(void)
 	// 第二个是一个标志位,用来表明是trap还是Interrupt,二者的区别好像在于是否运行中断嵌套,不是很清楚
 	// 第三个和第四个参数为 中断发生时,处理器跳转位置的CS和EIP,CS应该设置为GD_KT(这是内核的代码段的CS)
 	// EIP设置为入口地址,入口在trapentry.S中定义,我们用extern引用它们,这样的话函数名就是相应的入口地址
-	// 第五个参数 是一个权限等级,不是很清楚要怎么设置,先用全局描述符表中对应的字段来填充
+	// 第五个参数 特权级,特权级的意思是,如果要使用int xx来产生中断信号的话,那么使用该特权级来触发中断
+	// 也就是说,这个时候中断是从设置的特权级被触发的,那么要求是我们只能用int来调用一部分特权级比当前执行的程序
+	// 更低的中断,而特权级被设置为0的中断,我们在用户态(特权级为3)时是不能用int来触发的
+	// 那么对应硬件中断而言,这个特权级对中断源就不会有什么限制,但是中断处理中应该是将这个值作为中断源的特权级
 	extern void divide_trap(void);
 	SETGATE(idt[0], 0, GD_KT, divide_trap, gdt[0].sd_dpl);
 
@@ -80,10 +83,10 @@ trap_init(void)
 	SETGATE(idt[2], 0, GD_KT, nmi_trap, gdt[2].sd_dpl);
 
 	extern void breakpoint_trap(void);
-	SETGATE(idt[3], 0, GD_KT, breakpoint_trap, gdt[3].sd_dpl);
+	SETGATE(idt[3], 1, GD_KT, breakpoint_trap, gdt[3].sd_dpl);
 
 	extern void overflow_trap(void);
-	SETGATE(idt[4], 0, GD_KT, overflow_trap, gdt[4].sd_dpl);
+	SETGATE(idt[4], 1, GD_KT, overflow_trap, gdt[4].sd_dpl);
 
 	extern void bound_trap(void);
 	SETGATE(idt[5], 0, GD_KT, bound_trap, gdt[5].sd_dpl);
@@ -123,6 +126,10 @@ trap_init(void)
 
 	extern void simd_trap(void);
 	SETGATE(idt[19], 0, GD_KT, simd_trap, gdt[19].sd_dpl);
+
+	extern void syscall_trap(void);
+	SETGATE(idt[T_SYSCALL], 1, GD_KT, syscall_trap, 3);
+	// 这里的特权级需要设置为3
 	
 	// Per-CPU setup 
 	trap_init_percpu();
@@ -205,10 +212,16 @@ trap_dispatch(struct Trapframe *tf)
 	// 这里应该是要根据tf中的内容判断中断的类型,然后作出相应的处理
 	// 我们在这先直接打印相关的信息然后终止该进程
 	// 后续在根据需求添加具体的处理程序
-	print_trapframe(tf);
-	env_destroy(curenv);
-	return;
-
+	// 这里添加了对几个中断的特殊处理
+	// 页错误、断点中断、系统调用
+	if(tf->tf_trapno == T_PGFLT)
+		page_fault_handler(tf);
+	else if(tf->tf_trapno == T_BRKPT)
+		monitor(tf);
+	else if(tf->tf_trapno == T_SYSCALL) {
+		tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax, tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx, tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
+		return;
+	}
 
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);
@@ -270,6 +283,10 @@ page_fault_handler(struct Trapframe *tf)
 	// Handle kernel-mode page faults.
 
 	// LAB 3: Your code here.
+	// 如果是内核态发生page faults,那么直接panic
+	if((tf->tf_cs & 3) != 3) {
+		panic("kernel-mode page faults\n");
+	}
 
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.
