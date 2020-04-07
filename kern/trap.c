@@ -70,9 +70,74 @@ void
 trap_init(void)
 {
 	extern struct Segdesc gdt[];
-
 	// LAB 3: Your code here.
+	// 设置中断描述符表 idt
+	// SETGATE有5个参数,第一个为中断描述符表的表项
+	// 第二个是一个标志位,用来表明是trap还是Interrupt,二者的区别好像在于是否运行中断嵌套,不是很清楚
+	// 第三个和第四个参数为 中断发生时,处理器跳转位置的CS和EIP,CS应该设置为GD_KT(这是内核的代码段的CS)
+	// EIP设置为入口地址,入口在trapentry.S中定义,我们用extern引用它们,这样的话函数名就是相应的入口地址
+	// 第五个参数 特权级,特权级的意思是,如果要使用int xx来产生中断信号的话,那么使用该特权级来触发中断
+	// 也就是说,这个时候中断是从设置的特权级被触发的,那么要求是我们只能用int来调用一部分特权级比当前执行的程序
+	// 更低的中断,而特权级被设置为0的中断,我们在用户态(特权级为3)时是不能用int来触发的
+	// 那么对应硬件中断而言,这个特权级对中断源就不会有什么限制,但是中断处理中应该是将这个值作为中断源的特权级
+	extern void divide_trap(void);
+	SETGATE(idt[0], 0, GD_KT, divide_trap, gdt[0].sd_dpl);
 
+	extern void debug_trap(void);
+	SETGATE(idt[1], 0, GD_KT, debug_trap, gdt[1].sd_dpl);
+	
+	extern void nmi_trap(void);
+	SETGATE(idt[2], 0, GD_KT, nmi_trap, gdt[2].sd_dpl);
+
+	extern void breakpoint_trap(void);
+	SETGATE(idt[3], 1, GD_KT, breakpoint_trap, gdt[3].sd_dpl);
+
+	extern void overflow_trap(void);
+	SETGATE(idt[4], 1, GD_KT, overflow_trap, gdt[4].sd_dpl);
+
+	extern void bound_trap(void);
+	SETGATE(idt[5], 0, GD_KT, bound_trap, gdt[5].sd_dpl);
+
+	extern void illegal_trap(void);
+	SETGATE(idt[6], 0, GD_KT, illegal_trap, gdt[6].sd_dpl);
+
+	extern void device_trap(void);
+	SETGATE(idt[7], 0, GD_KT, device_trap, gdt[7].sd_dpl);
+
+	extern void double_fault_trap(void);
+	SETGATE(idt[8], 0, GD_KT, double_fault_trap, gdt[8].sd_dpl);
+
+	extern void task_switch_trap(void);
+	SETGATE(idt[10], 0, GD_KT, task_switch_trap, gdt[10].sd_dpl);
+
+	extern void seg_trap(void);
+	SETGATE(idt[11], 0, GD_KT, seg_trap, gdt[11].sd_dpl);
+
+	extern void stack_trap(void);
+	SETGATE(idt[12], 0, GD_KT, stack_trap, gdt[12].sd_dpl);
+
+	extern void gp_trap(void);
+	SETGATE(idt[13], 0, GD_KT, gp_trap, gdt[13].sd_dpl);
+
+	extern void page_fault_trap(void);
+	SETGATE(idt[14], 0, GD_KT, page_fault_trap, gdt[14].sd_dpl);
+
+	extern void fp_error_trap(void);
+	SETGATE(idt[16], 0, GD_KT, fp_error_trap, gdt[16].sd_dpl);
+
+	extern void align_trap(void);
+	SETGATE(idt[17], 0, GD_KT, align_trap, gdt[17].sd_dpl);
+
+	extern void machine_trap(void);
+	SETGATE(idt[18], 0, GD_KT, machine_trap, gdt[18].sd_dpl);
+
+	extern void simd_trap(void);
+	SETGATE(idt[19], 0, GD_KT, simd_trap, gdt[19].sd_dpl);
+
+	extern void syscall_trap(void);
+	SETGATE(idt[T_SYSCALL], 1, GD_KT, syscall_trap, 3);
+	// 这里的特权级需要设置为3
+	
 	// Per-CPU setup 
 	trap_init_percpu();
 }
@@ -176,6 +241,19 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
+	// 这里应该是要根据tf中的内容判断中断的类型,然后作出相应的处理
+	// 我们在这先直接打印相关的信息然后终止该进程
+	// 后续在根据需求添加具体的处理程序
+	// 这里添加了对几个中断的特殊处理
+	// 页错误、断点中断、系统调用
+	if(tf->tf_trapno == T_PGFLT)
+		page_fault_handler(tf);
+	else if(tf->tf_trapno == T_BRKPT)
+		monitor(tf);
+	else if(tf->tf_trapno == T_SYSCALL) {
+		tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax, tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx, tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
+		return;
+	}
 
 	// Handle spurious interrupts
 	// The hardware sometimes raises these because of noise on the
@@ -271,6 +349,10 @@ page_fault_handler(struct Trapframe *tf)
 	// Handle kernel-mode page faults.
 
 	// LAB 3: Your code here.
+	// 如果是内核态发生page faults,那么直接panic
+	if((tf->tf_cs & 3) != 3) {
+		panic("kernel-mode page faults\n");
+	}
 
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.
