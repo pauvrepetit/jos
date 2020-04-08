@@ -377,6 +377,10 @@ load_icode(struct Env *e, uint8_t *binary)
 	// 我们调用之前编写的分配物理页函数得到的物理页几乎肯定是不连续的,即使页与页之间是连续的,它们的分配顺序也是
 	// 反过来的),所以我们不能直接找到p_va对应与kern_pgdir中的虚地址,然后就使用memset向该地址处写入数据
 	// 为了保证所以的数据都写入了正确的位置,我们按字节逐个的写入内存中
+
+	// 这里一定要注意一个问题,就是,我们不能够修改binary指向的内存空间的数据
+	// 开始的时候不小心写了一句ph->p_va++,这个实际上是会修改binary里的数据的,这导致下一次创建进程的时候
+	// 再读这个binary的数据就不对了
 	struct Proghdr *ph, *eph;
 	if(((struct Elf *)binary)->e_magic != ELF_MAGIC)
 		panic("binary's e_magic != ELF_MAGIC\n");
@@ -387,13 +391,15 @@ load_icode(struct Env *e, uint8_t *binary)
 	for(; ph < eph; ph++) {
 		if(ph->p_type != ELF_PROG_LOAD || ph->p_filesz > ph->p_memsz)
 			continue;
-		region_alloc(e, (void *)ph->p_va, ph->p_memsz);
-		physaddr_t paddr = PTE_ADDR(*pgdir_walk(e->env_pgdir, (void *)ph->p_va, 0));
+		
+		uint32_t va = ph->p_va;
+		region_alloc(e, (void *)va, ph->p_memsz);
+		physaddr_t paddr = PTE_ADDR(*pgdir_walk(e->env_pgdir, (void *)va, 0));
 		int i = 0;
 		for(; i < ph->p_filesz; i++) {
-			paddr = PTE_ADDR(*pgdir_walk(e->env_pgdir, (void *)ph->p_va, 0)) + (ph->p_va & 0xFFF);
+			paddr = PTE_ADDR(*pgdir_walk(e->env_pgdir, (void *)va, 0)) + (va & 0xFFF);
 			*(uint8_t *)KADDR(paddr) = (binary + ph->p_offset)[i];
-			ph->p_va++;
+			va++;
 		}
 	}
 	// 这里还需要将binary中的入口地址e_entry写入到进程e保存eip寄存器的位置
@@ -421,9 +427,11 @@ env_create(uint8_t *binary, enum EnvType type)
 	// LAB 3: Your code here.
 	// 创建新的进程,调用下面两个函数即可
 	// 首先分配一些内存用来保存进程结构,然后加载数据/代码等的镜像
+	// 看注释的内容,我们还需要设置env_type
 	struct Env *new_env;
 	env_alloc(&new_env, 0);
 	load_icode(new_env, binary);
+	new_env->env_type = type;
 }
 
 //
@@ -568,6 +576,9 @@ env_run(struct Env *e)
 	curenv->env_status = ENV_RUNNING;
 	curenv->env_runs++;
 	lcr3(PADDR(curenv->env_pgdir));
+
+	// 释放这个锁
+	unlock_kernel();
 
 	env_pop_tf(&(curenv->env_tf));
 

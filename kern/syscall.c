@@ -86,7 +86,33 @@ sys_exofork(void)
 	// will appear to return 0.
 
 	// LAB 4: Your code here.
-	panic("sys_exofork not implemented");
+	// 这个是创建一个空进程的函数
+	// 我们以当前运行的进程为父进程和模板创建一个子进程
+	// 把这个子进程的status设置为ENV_NOT_RUNNABLE
+	// 还要根据父进程的env_tf的内容,为子进程设置env_tf,这里保存的是父进程进入中断时的断点
+	// 这样的话,子进程开始执行后,就会直接回到父进程中断时的下一条指令处执行
+	// 由于子进程的返回值应该是0,而返回值保存在eax中,所以我们需要把env_tf中eax寄存器对应的字段置为0
+	// 那个地方的置原本是sys_exfork系统调用的调用号7(开始时没仔细分析这个问题,
+	// 所以导致子进程开始后就会从sys_exofork中返回7,傻了)
+
+	struct Env *new_env;
+	int res = 0;
+	res = env_alloc(&new_env, curenv->env_id);
+	if(new_env->env_id == curenv->env_id) {
+		return 0;
+	}
+	if(res == 0) {
+		new_env->env_status = ENV_NOT_RUNNABLE;
+		memcpy(&new_env->env_tf, &curenv->env_tf, sizeof(curenv->env_tf));
+		new_env->env_tf.tf_regs.reg_eax = 0;
+		// 这有个问题,上面的注释没怎么看懂啊 什么叫做tweaked so sys_exofork will appear to return 0
+		// 看来这个的意思是说,我们需要把其中的一个寄存器置0,来表明子进程的返回值为0吧
+		// 事实上,子进程继承了父进程的env_tf之后,当它开始执行的时候就会从父进程进入中断的那个位置的下一条指令开始
+		return new_env->env_id;
+	} else {
+		return res;
+	}
+	// panic("sys_exofork not implemented");
 }
 
 // Set envid's env_status to status, which must be ENV_RUNNABLE
@@ -106,7 +132,20 @@ sys_env_set_status(envid_t envid, int status)
 	// envid's status.
 
 	// LAB 4: Your code here.
-	panic("sys_env_set_status not implemented");
+	// 给进程设置status字段
+	if(status != ENV_RUNNABLE && status != ENV_NOT_RUNNABLE)
+		return -E_INVAL;
+
+	struct Env *env;
+	int res = envid2env(envid, &env, 1);
+	if(res != 0)
+		return res;
+	else {
+		env->env_status = status;
+		return 0;
+	}
+
+	// panic("sys_env_set_status not implemented");
 }
 
 // Set the page fault upcall for 'envid' by modifying the corresponding struct
@@ -151,7 +190,33 @@ sys_page_alloc(envid_t envid, void *va, int perm)
 	//   allocated!
 
 	// LAB 4: Your code here.
-	panic("sys_page_alloc not implemented");
+	// 为envid进程申请一个页,并将其映射到虚地址va的位置
+	if((uint32_t)va >= UTOP || ((uint32_t)va & (PGSIZE - 1)) != 0) {
+		return -E_INVAL;
+	}
+	if((perm & (PTE_P | PTE_U)) != (PTE_P | PTE_U)) {
+		return -E_INVAL;
+	}
+	if(perm & ~PTE_SYSCALL) {
+		return -E_INVAL;
+	}
+	struct Env *env;
+	int res = envid2env(envid, &env, 1);
+	if(res != 0)
+		return res;
+	else {
+		struct PageInfo *pp = page_alloc(ALLOC_ZERO);
+		if(pp == NULL)
+			return -E_NO_MEM;
+		else {
+			res = page_insert(env->env_pgdir, pp, va, perm);
+			if(res != 0)
+				page_free(pp);
+			return res;
+		}
+	}
+
+	// panic("sys_page_alloc not implemented");
 }
 
 // Map the page of memory at 'srcva' in srcenvid's address space
@@ -182,7 +247,43 @@ sys_page_map(envid_t srcenvid, void *srcva,
 	//   check the current permissions on the page.
 
 	// LAB 4: Your code here.
-	panic("sys_page_map not implemented");
+	// 将srcenvid进程的虚地址srcva处对应的物理地址页映射到dstenvid进程的虚地址dstva处
+	if((uint32_t)srcva >= UTOP || ((uint32_t)srcva & (PGSIZE - 1)) != 0) {
+		return -E_INVAL;
+	}
+	if((uint32_t)dstva >= UTOP || ((uint32_t)dstva & (PGSIZE - 1)) != 0) {
+		return -E_INVAL;
+	}
+
+	if((perm & (PTE_P | PTE_U)) != (PTE_P | PTE_U)) {
+		return -E_INVAL;
+	}
+	if(perm & ~PTE_SYSCALL) {
+		return -E_INVAL;
+	}
+
+	struct Env *src_env, *dst_env;
+	pte_t *src_pte;
+	int res;
+	res = envid2env(srcenvid, &src_env, 1);
+	if(res != 0)
+		return res;
+	res = envid2env(dstenvid, &dst_env, 1);
+	if(res != 0)
+		return res;
+	struct PageInfo *pp = page_lookup(src_env->env_pgdir, srcva, &src_pte);
+	if(pp == NULL) {
+		return -E_INVAL;
+	}
+	
+	if(!(*src_pte & PTE_W) && (perm & PTE_W)) {
+		return -E_INVAL;
+	}
+
+	res = page_insert(dst_env->env_pgdir, pp, dstva, perm);
+	return res;
+
+	// panic("sys_page_map not implemented");
 }
 
 // Unmap the page of memory at 'va' in the address space of 'envid'.
@@ -198,7 +299,18 @@ sys_page_unmap(envid_t envid, void *va)
 	// Hint: This function is a wrapper around page_remove().
 
 	// LAB 4: Your code here.
-	panic("sys_page_unmap not implemented");
+	// 取消envid进程在虚地址va处的一个页的映射
+	if((uint32_t)va >= UTOP || ((uint32_t)va & (PGSIZE - 1)) != 0)
+		return -E_INVAL;
+
+	struct Env *env;
+	int res = envid2env(envid, &env, 1);
+	if(res != 0)
+		return res;
+	page_remove(env->env_pgdir, va);
+	return 0;
+
+	// panic("sys_page_unmap not implemented");
 }
 
 // Try to send 'value' to the target env 'envid'.
@@ -286,6 +398,20 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 		return sys_getenvid();
 	case SYS_env_destroy:
 		sys_env_destroy(a1);
+		return 0;
+	case SYS_page_alloc:
+		return sys_page_alloc(a1, (void *)a2, a3);
+	case SYS_page_map:
+		return sys_page_map(a1, (void *)a2, a3, (void *)a4, a5);
+	case SYS_page_unmap:
+		return sys_page_unmap(a1, (void *)a2);
+	case SYS_exofork:
+		return sys_exofork();
+	case SYS_env_set_status:
+		return sys_env_set_status(a1, a2);
+	case SYS_yield:
+		sys_yield();
+		return 0;
 	case NSYSCALLS:
 		;
 	default:

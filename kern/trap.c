@@ -80,62 +80,63 @@ trap_init(void)
 	// 也就是说,这个时候中断是从设置的特权级被触发的,那么要求是我们只能用int来调用一部分特权级比当前执行的程序
 	// 更低的中断,而特权级被设置为0的中断,我们在用户态(特权级为3)时是不能用int来触发的
 	// 那么对应硬件中断而言,这个特权级对中断源就不会有什么限制,但是中断处理中应该是将这个值作为中断源的特权级
+	// 这个特权级要怎么设置,其实还是不是很清楚,可能在intel的手册里面有吧,但是intel的指令集的手册是在是太长了...
 	extern void divide_trap(void);
-	SETGATE(idt[0], 0, GD_KT, divide_trap, gdt[0].sd_dpl);
+	SETGATE(idt[0], 0, GD_KT, divide_trap, 0);
 
 	extern void debug_trap(void);
-	SETGATE(idt[1], 0, GD_KT, debug_trap, gdt[1].sd_dpl);
+	SETGATE(idt[1], 0, GD_KT, debug_trap, 0);
 	
 	extern void nmi_trap(void);
-	SETGATE(idt[2], 0, GD_KT, nmi_trap, gdt[2].sd_dpl);
+	SETGATE(idt[2], 0, GD_KT, nmi_trap, 0);
 
 	extern void breakpoint_trap(void);
-	SETGATE(idt[3], 1, GD_KT, breakpoint_trap, gdt[3].sd_dpl);
+	SETGATE(idt[3], 1, GD_KT, breakpoint_trap, 3);
 
 	extern void overflow_trap(void);
-	SETGATE(idt[4], 1, GD_KT, overflow_trap, gdt[4].sd_dpl);
+	SETGATE(idt[4], 1, GD_KT, overflow_trap, 0);
 
 	extern void bound_trap(void);
-	SETGATE(idt[5], 0, GD_KT, bound_trap, gdt[5].sd_dpl);
+	SETGATE(idt[5], 0, GD_KT, bound_trap, 0);
 
 	extern void illegal_trap(void);
-	SETGATE(idt[6], 0, GD_KT, illegal_trap, gdt[6].sd_dpl);
+	SETGATE(idt[6], 0, GD_KT, illegal_trap, 0);
 
 	extern void device_trap(void);
-	SETGATE(idt[7], 0, GD_KT, device_trap, gdt[7].sd_dpl);
+	SETGATE(idt[7], 0, GD_KT, device_trap, 0);
 
 	extern void double_fault_trap(void);
-	SETGATE(idt[8], 0, GD_KT, double_fault_trap, gdt[8].sd_dpl);
+	SETGATE(idt[8], 0, GD_KT, double_fault_trap, 0);
 
 	extern void task_switch_trap(void);
-	SETGATE(idt[10], 0, GD_KT, task_switch_trap, gdt[10].sd_dpl);
+	SETGATE(idt[10], 0, GD_KT, task_switch_trap, 0);
 
 	extern void seg_trap(void);
-	SETGATE(idt[11], 0, GD_KT, seg_trap, gdt[11].sd_dpl);
+	SETGATE(idt[11], 0, GD_KT, seg_trap, 0);
 
 	extern void stack_trap(void);
-	SETGATE(idt[12], 0, GD_KT, stack_trap, gdt[12].sd_dpl);
+	SETGATE(idt[12], 0, GD_KT, stack_trap, 0);
 
 	extern void gp_trap(void);
-	SETGATE(idt[13], 0, GD_KT, gp_trap, gdt[13].sd_dpl);
+	SETGATE(idt[13], 0, GD_KT, gp_trap, 0);
 
 	extern void page_fault_trap(void);
-	SETGATE(idt[14], 0, GD_KT, page_fault_trap, gdt[14].sd_dpl);
+	SETGATE(idt[14], 0, GD_KT, page_fault_trap, 0);
 
 	extern void fp_error_trap(void);
-	SETGATE(idt[16], 0, GD_KT, fp_error_trap, gdt[16].sd_dpl);
+	SETGATE(idt[16], 0, GD_KT, fp_error_trap, 0);
 
 	extern void align_trap(void);
-	SETGATE(idt[17], 0, GD_KT, align_trap, gdt[17].sd_dpl);
+	SETGATE(idt[17], 0, GD_KT, align_trap, 0);
 
 	extern void machine_trap(void);
-	SETGATE(idt[18], 0, GD_KT, machine_trap, gdt[18].sd_dpl);
+	SETGATE(idt[18], 0, GD_KT, machine_trap, 0);
 
 	extern void simd_trap(void);
-	SETGATE(idt[19], 0, GD_KT, simd_trap, gdt[19].sd_dpl);
+	SETGATE(idt[19], 0, GD_KT, simd_trap, 0);
 
 	extern void syscall_trap(void);
-	SETGATE(idt[T_SYSCALL], 1, GD_KT, syscall_trap, 3);
+	SETGATE(idt[48], 0, GD_KT, syscall_trap, 3);
 	// 这里的特权级需要设置为3
 	
 	// Per-CPU setup 
@@ -170,21 +171,32 @@ trap_init_percpu(void)
 	// user space on that CPU.
 	//
 	// LAB 4: Your code here:
+	// 为每个CPU初始化他们各自的TSS和IDT
+	// IDT的设置其实是一样的,都是上面trip_init函数中写的那样
+	// TSS的设置和单处理器时有所不同(其实单处理器时的状态就是cpu_id为0时的设置方法)
+	// TSS应该是GDT中的一些项,每个CPU的TSS都对应与GDT中的一个项,这个项的位置开始与GD_TSS0>>3的位置,
+	// 当然右移3位的目的应该是在设置一些寄存器的时候方便起见,当然,这可能也限制了我们系统能够支持的CPU的数量吧
+	// 应该最多只能够支持8个CPU
 
 	// Setup a TSS so that we get the right stack
 	// when we trap to the kernel.
-	ts.ts_esp0 = KSTACKTOP;
-	ts.ts_ss0 = GD_KD;
-	ts.ts_iomb = sizeof(struct Taskstate);
+	thiscpu->cpu_ts.ts_esp0 = KSTACKTOP - (KSTKSIZE + KSTKGAP) * thiscpu->cpu_id;
+	thiscpu->cpu_ts.ts_ss0 = GD_KD;
+	thiscpu->cpu_ts.ts_iomb = sizeof(struct Taskstate);
+	// ts.ts_esp0 = KSTACKTOP;
+	// ts.ts_ss0 = GD_KD;
+	// ts.ts_iomb = sizeof(struct Taskstate);
 
 	// Initialize the TSS slot of the gdt.
-	gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&ts),
-					sizeof(struct Taskstate) - 1, 0);
-	gdt[GD_TSS0 >> 3].sd_s = 0;
+	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id] = SEG16(STS_T32A, (uint32_t) (&(thiscpu->cpu_ts)), sizeof(struct Taskstate) - 1, 0);
+	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id].sd_s = 0;
+	// gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&ts),
+	// 				sizeof(struct Taskstate) - 1, 0);
+	// gdt[GD_TSS0 >> 3].sd_s = 0;
 
 	// Load the TSS selector (like other segment selectors, the
 	// bottom three bits are special; we leave them 0)
-	ltr(GD_TSS0);
+	ltr(GD_TSS0 + (thiscpu->cpu_id << 3));
 
 	// Load the IDT
 	lidt(&idt_pd);
@@ -304,7 +316,9 @@ trap(struct Trapframe *tf)
 		// Acquire the big kernel lock before doing any
 		// serious kernel work.
 		// LAB 4: Your code here.
+		// 上锁
 		assert(curenv);
+		lock_kernel();
 
 		// Garbage collect if current enviroment is a zombie
 		if (curenv->env_status == ENV_DYING) {

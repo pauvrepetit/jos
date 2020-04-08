@@ -29,6 +29,38 @@ sched_yield(void)
 	// below to halt the cpu.
 
 	// LAB 4: Your code here.
+	// 这是进程调度函数,首先我们要考虑这个特殊情况,当前还没有进程正在执行,此时curenv为0
+	// 我们从进程列表的开头开始搜索,找到一个RUNNABLE的进程并执行它
+	// 如果当前有进程正在执行,那么就从该进程开始,扫到进程列表的最后,然后从进程列表的开始扫到该进程的位置
+	// 找到一个可以运行的进程并执行它,如果没有的话
+	// 我们就判断当前正在执行的进程是否还是RUNNING的(这个不是应该一定是RUNNING吗)
+	// 如果是RUNNING的话,我们就让这个进程接着执行
+	// 不然的话,就意味着没有可以执行的进程了,那么我们使用sched_halt来处理它
+	if(curenv == 0) {
+		idle = envs;
+		for(; idle < envs + NENV; idle++) {
+			if(idle->env_status == ENV_RUNNABLE) {
+				env_run(idle);
+			}
+		}
+	} else {
+		idle = curenv + 1;
+		for(; idle < envs + NENV; idle++) {
+			if(idle->env_status == ENV_RUNNABLE) {
+				// cprintf("new env id is %x\n", idle->env_id);
+				// 那么这个idle就是我们需要调度执行的进程
+				env_run(idle);
+			}
+		}
+		for(idle = envs; idle < curenv; idle++) {
+			if(idle->env_status == ENV_RUNNABLE) {
+				env_run(idle);
+			}
+		}
+		if(curenv->env_status == ENV_RUNNING) {
+			return;
+		}
+	}
 
 	// sched_halt never returns
 	sched_halt();

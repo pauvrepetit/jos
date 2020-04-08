@@ -235,6 +235,9 @@ mem_init(void)
 	// Permissions: kernel RW, user NONE
 	// Your code goes here:
 
+	// 把虚拟地址[KERNBASE, 2^32)映射到实地址0开始的位置，需要注意一下计算的问题
+	boot_map_region(kern_pgdir, KERNBASE, -KERNBASE, 0, PTE_P | PTE_W);
+
 	// Initialize the SMP-related parts of the memory map
 	mem_init_mp();
 
@@ -286,6 +289,11 @@ mem_init_mp(void)
 	//
 	// LAB 4: Your code here:
 
+	// 这里我们把每个CPU的kernel stack映射到相应的虚拟地址空间
+	int i = 0;
+	for(; i < NCPU; i++) {
+		boot_map_region(kern_pgdir, KSTACKTOP - i * (KSTKSIZE + KSTKGAP) - KSTKSIZE, KSTKSIZE, (physaddr_t)PADDR(percpu_kstacks[i]), PTE_P | PTE_W);
+	}
 }
 
 // --------------------------------------------------------------
@@ -329,8 +337,23 @@ page_init(void)
 	// 首先 page0 是被BIOS等数据结构使用了的
 	pages[0].pp_ref = 0;
 	pages[0].pp_link = NULL;
-	// 接下来，剩下的base memory是free的
-	for (i = 1; i < npages_basemem; i++) {
+	// // 接下来，剩下的base memory是free的
+	// for (i = 1; i < npages_basemem; i++) {
+	// 	pages[i].pp_ref = 0;
+	// 	pages[i].pp_link = page_free_list;
+	// 	page_free_list = &pages[i];
+	// }
+	// 上面是在单处理器系统上的情况,在SMP系统中,物理地址MPENTRY_PADDR处的一个页被AP处理器使用
+	// 用来存储其启动初期处于实模式时的程序代码,因此这一页不能够添加到page_free_list中
+	for (i = 1; i < MPENTRY_PADDR >> PGSHIFT; i++) {
+		pages[i].pp_ref = 0;
+		pages[i].pp_link = page_free_list;
+		page_free_list = &pages[i];
+	}
+	pages[i].pp_ref = 0;
+	pages[i].pp_link = NULL;
+	i++;
+	for(; i < npages_basemem; i++) {
 		pages[i].pp_ref = 0;
 		pages[i].pp_link = page_free_list;
 		page_free_list = &pages[i];
@@ -650,7 +673,16 @@ mmio_map_region(physaddr_t pa, size_t size)
 	// Hint: The staff solution uses boot_map_region.
 	//
 	// Your code here:
-	panic("mmio_map_region not implemented");
+	// 将物理地址pa映射到虚拟地址base上,将这些页设置为uncache和write-through
+	// 映射完以后,将base的值增加到其后面的一页的开始位置
+	// 如果映射的内存超过了MMIOLIM的上限,那么直接panic
+
+	// panic("mmio_map_region not implemented");
+	if(base + ROUNDUP(size, PGSIZE) >= MMIOLIM)
+		panic("mmio overflow\n");
+	boot_map_region(kern_pgdir, base, ROUNDUP(size, PGSIZE), pa, PTE_PCD | PTE_PWT | PTE_W | PTE_P);
+	base += ROUNDUP(size, PGSIZE);
+	return (void *)(base - ROUNDUP(size, PGSIZE));
 }
 
 static uintptr_t user_mem_check_addr;
