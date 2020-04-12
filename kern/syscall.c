@@ -160,7 +160,17 @@ static int
 sys_env_set_pgfault_upcall(envid_t envid, void *func)
 {
 	// LAB 4: Your code here.
-	panic("sys_env_set_pgfault_upcall not implemented");
+	// 给进程添加page fault的处理程序,程序入口放在进程信息块中env_pgfault_upcall字段中
+	struct Env *env;
+	int res = envid2env(envid, &env, 1);
+	if(res != 0) {
+		// envid2env失败
+		return res;
+	} else {
+		env->env_pgfault_upcall = func;
+		return 0;
+	}
+	// panic("sys_env_set_pgfault_upcall not implemented");
 }
 
 // Allocate a page of memory and map it at 'va' with permission
@@ -409,6 +419,8 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 		return sys_exofork();
 	case SYS_env_set_status:
 		return sys_env_set_status(a1, a2);
+	case SYS_env_set_pgfault_upcall:
+		return sys_env_set_pgfault_upcall(a1, (void *)a2);
 	case SYS_yield:
 		sys_yield();
 		return 0;

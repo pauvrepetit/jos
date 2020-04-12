@@ -578,7 +578,9 @@ env_run(struct Env *e)
 	lcr3(PADDR(curenv->env_pgdir));
 
 	// 释放这个锁
-	unlock_kernel();
+	// 按照文档所说的,这里的锁应该是在进入用户态的时候释放的
+	if((curenv->env_tf.tf_cs & 3) == 3)
+		unlock_kernel();
 
 	env_pop_tf(&(curenv->env_tf));
 

@@ -731,13 +731,14 @@ user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 	size_t roundSize = ROUNDUP(va + len, PGSIZE) - roundDownVa;
 	int i = 0;
 	pde_t *pgdir = env->env_pgdir;
-	if(((*pgdir_walk(pgdir, roundDownVa, 0)) & (perm | PTE_P)) != (perm | PTE_P)) {
+	pte_t *pte = pgdir_walk(pgdir, roundDownVa, 0);	// 这里的参数create是0,所以有可能返回NULL
+	if((pte == NULL) || ((*pte) & (perm | PTE_P)) != (perm | PTE_P)) {
 		user_mem_check_addr = (uintptr_t)va;
 		return -E_FAULT;
 	}
 	for(i = 1; i < roundSize >> PGSHIFT; i++) {
 		roundDownVa += PGSIZE;
-		if(((*pgdir_walk(pgdir, roundDownVa, 0)) & (perm | PTE_P)) != (perm | PTE_P)) {
+		if((pte == NULL) || ((*pte) & (perm | PTE_P)) != (perm | PTE_P)) {
 			user_mem_check_addr = (uintptr_t)roundDownVa;
 			return -E_FAULT;
 		}

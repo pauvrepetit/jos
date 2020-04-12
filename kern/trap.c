@@ -401,6 +401,56 @@ page_fault_handler(struct Trapframe *tf)
 	//   (the 'tf' variable points at 'curenv->env_tf').
 
 	// LAB 4: Your code here.
+	// 这里需要构建正确的栈结构来实现程序的跳转.
+	// 我们将需要压入异常栈的数据使用异常栈的指针送入到异常栈中
+	// 然后我们使用env_run函数实现程序的跳转
+	// 在跳转的过程中,我们需要实现栈的切换(即修改esp)和程序地址的切换(即修改eip)
+	// 因此我们需要把正确的esp和eip值设置到该进程信息块的tf字段中(该字段保存了进程下次启动时的各个寄存器的值)
+	uintptr_t esp = UXSTACKTOP;
+	if(curenv->env_pgfault_upcall != NULL) {
+		// 表示 该进程存在page fault的处理程序
+		// 如果没有分配异常堆栈 或者异常堆栈不能访问 那么就杀死这个进程
+		user_mem_assert(curenv, (void *)(UXSTACKTOP - 4), PGSIZE, PTE_P);
+		if(tf->tf_esp < UXSTACKTOP && tf->tf_esp >= (UXSTACKTOP - PGSIZE)) {
+			// 说明 我们是在异常处理时出现page fault,然后到这里来的
+			// 这种情况下,我们需要检查在向异常堆栈中写入数据的时候是否会溢出
+			user_mem_assert(curenv, (void *)(tf->tf_esp - 56), 56, PTE_P);
+			esp = tf->tf_esp - 4;	// 空出32bit的部分
+			*(int *)esp = 0;
+		}
+		esp -= 4;
+		*(int *)esp = tf->tf_esp;
+		esp -= 4;
+		*(int *)esp = tf->tf_eflags;
+		esp -= 4;
+		*(int *)esp = tf->tf_eip;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_eax;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_ecx;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_edx;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_ebx;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_oesp;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_ebp;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_esi;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_edi;
+		esp -= 4;
+		*(int *)esp = tf->tf_err;
+		esp -= 4;
+		*(int *)esp = fault_va;
+		// 上面完成了异常堆栈数据的填入 下面我们修改env的tf字段中断相关寄存器 实现跳转
+		tf->tf_eip = (uintptr_t)curenv->env_pgfault_upcall;
+		tf->tf_esp = esp;
+
+		// 使用env_run来实现跳转 env_run会根据我们上面设置的tf_eip和tf_esp来实现程序流程的跳转和堆栈的切换
+		env_run(curenv);
+	}
 
 	// Destroy the environment that caused the fault.
 	cprintf("[%08x] user fault va %08x ip %08x\n",
