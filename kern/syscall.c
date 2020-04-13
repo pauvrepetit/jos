@@ -365,7 +365,61 @@ static int
 sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva, unsigned perm)
 {
 	// LAB 4: Your code here.
-	panic("sys_ipc_try_send not implemented");
+
+	// 首先检查envid对应的进程是否存在
+	struct Env *env;
+	int res = envid2env(envid, &env, 0);
+	if(res != 0)
+		return res;
+	
+	// 如果envid没有被ipc_recv锁定(也就是说,他没有调用接收函数)
+	// 或者 已经有其他的进程给envid发送数据并且被它接收了
+	// 此时 发送是失败的
+	if(env->env_ipc_recving == 0)
+		return -E_IPC_NOT_RECV;
+
+	// 首先将env_ipc_perm置为0,如果后续需要设置它的值的话,就设置为新的值
+	// 否则就保持这里赋值的0
+	env->env_ipc_perm = 0;
+	
+	if((uint32_t)srcva < UTOP) {
+		if(((uint32_t)srcva & (PGSIZE - 1)) != 0)
+			return -E_INVAL;
+		if((perm & (PTE_P | PTE_U)) != (PTE_P | PTE_U))
+			return -E_INVAL;
+		if(perm & ~PTE_SYSCALL)
+			return -E_INVAL;
+		pte_t pte = *pgdir_walk(curenv->env_pgdir, srcva, 0);
+		if(pte == 0)
+			return -E_INVAL;
+		if((perm & PTE_W) && !(pte & PTE_W))
+			return -E_INVAL;
+		
+		// 注意这里不能调用sys_page_map来实现页面映射
+		// 因为sys_page_map中要求当前进程能够对对方进程的进程信息块进行修改(即需要检查权限)
+		// 此处我们实际上是没有这个权限的,因此我们需要直接书写该函数中的功能,而不执行上述权限检查
+		// res = sys_page_map(curenv->env_id, srcva, envid, env->env_ipc_dstva, perm);
+
+		struct PageInfo *pp = page_lookup(curenv->env_pgdir, srcva, NULL);
+		if(pp == NULL) {
+			return -E_INVAL;
+		}
+		res = page_insert(env->env_pgdir, pp, env->env_ipc_dstva, perm);
+
+		if(res == 0)
+			env->env_ipc_perm = perm;
+		// 到此 我们就映射成功了,或者根本就不需要映射
+	}
+
+	env->env_ipc_from = curenv->env_id;
+	env->env_ipc_recving = 0;
+	env->env_ipc_value = value;
+
+	env->env_status = ENV_RUNNABLE;
+
+	return 0;
+
+	// panic("sys_ipc_try_send not implemented");
 }
 
 // Block until a value is ready.  Record that you want to receive
@@ -383,7 +437,24 @@ static int
 sys_ipc_recv(void *dstva)
 {
 	// LAB 4: Your code here.
-	panic("sys_ipc_recv not implemented");
+	// 进入接收信息的状态
+	if((uint32_t)dstva < UTOP && ((uint32_t)dstva & (PGSIZE - 1)) != 0)
+		return -E_INVAL;
+
+	curenv->env_ipc_recving = 1;
+	curenv->env_ipc_dstva = dstva;
+	curenv->env_status = ENV_NOT_RUNNABLE;
+
+	curenv->env_tf.tf_regs.reg_eax = 0;		// 设置返回值
+	sched_yield();	// 启动调度器 调度一个新的进程进入CPU指向
+	// 此进程不能够被调度程序调度到了
+	// 当收到数据后,发送方将把此进程的status变为RUNNABLE
+	// 此后,调度程序可以调度到此进程,调度程序使用env_run来启动此进程,
+	// 也就是根据我们的env_tf来觉得启动时的状态
+	// 我们的env_tf应该是在上次调用系统调用的时候发生中断设置的
+	// 我们把env_tf中的eax的值设置为0,然后进程被调度时,中断将返回,返回值为0
+
+	// panic("sys_ipc_recv not implemented");
 	return 0;
 }
 
@@ -424,6 +495,10 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 	case SYS_yield:
 		sys_yield();
 		return 0;
+	case SYS_ipc_try_send:
+		return sys_ipc_try_send(a1, a2, (void *)a3, a4);
+	case SYS_ipc_recv:
+		return sys_ipc_recv((void *)a1);
 	case NSYSCALLS:
 		;
 	default:

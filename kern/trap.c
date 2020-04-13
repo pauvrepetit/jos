@@ -138,6 +138,40 @@ trap_init(void)
 	extern void syscall_trap(void);
 	SETGATE(idt[48], 0, GD_KT, syscall_trap, 3);
 	// 这里的特权级需要设置为3
+
+	extern void irq_trap0(void);
+	extern void irq_trap1(void);
+	extern void irq_trap2(void);
+	extern void irq_trap3(void);
+	extern void irq_trap4(void);
+	extern void irq_trap5(void);
+	extern void irq_trap6(void);
+	extern void irq_trap7(void);
+	extern void irq_trap8(void);
+	extern void irq_trap9(void);
+	extern void irq_trap10(void);
+	extern void irq_trap11(void);
+	extern void irq_trap12(void);
+	extern void irq_trap13(void);
+	extern void irq_trap14(void);
+	extern void irq_trap15(void);
+
+	SETGATE(idt[IRQ_OFFSET + 0], 0, GD_KT, irq_trap0, 0);
+	SETGATE(idt[IRQ_OFFSET + 1], 0, GD_KT, irq_trap1, 0);
+	SETGATE(idt[IRQ_OFFSET + 2], 0, GD_KT, irq_trap2, 0);
+	SETGATE(idt[IRQ_OFFSET + 3], 0, GD_KT, irq_trap3, 0);
+	SETGATE(idt[IRQ_OFFSET + 4], 0, GD_KT, irq_trap4, 0);
+	SETGATE(idt[IRQ_OFFSET + 5], 0, GD_KT, irq_trap5, 0);
+	SETGATE(idt[IRQ_OFFSET + 6], 0, GD_KT, irq_trap6, 0);
+	SETGATE(idt[IRQ_OFFSET + 7], 0, GD_KT, irq_trap7, 0);
+	SETGATE(idt[IRQ_OFFSET + 8], 0, GD_KT, irq_trap8, 0);
+	SETGATE(idt[IRQ_OFFSET + 9], 0, GD_KT, irq_trap9, 0);
+	SETGATE(idt[IRQ_OFFSET + 10], 0, GD_KT, irq_trap10, 0);
+	SETGATE(idt[IRQ_OFFSET + 11], 0, GD_KT, irq_trap11, 0);
+	SETGATE(idt[IRQ_OFFSET + 12], 0, GD_KT, irq_trap12, 0);
+	SETGATE(idt[IRQ_OFFSET + 13], 0, GD_KT, irq_trap13, 0);
+	SETGATE(idt[IRQ_OFFSET + 14], 0, GD_KT, irq_trap14, 0);
+	SETGATE(idt[IRQ_OFFSET + 15], 0, GD_KT, irq_trap15, 0);
 	
 	// Per-CPU setup 
 	trap_init_percpu();
@@ -279,6 +313,11 @@ trap_dispatch(struct Trapframe *tf)
 	// Handle clock interrupts. Don't forget to acknowledge the
 	// interrupt using lapic_eoi() before calling the scheduler!
 	// LAB 4: Your code here.
+	// 处理时钟中断
+	if(tf->tf_trapno == IRQ_OFFSET + IRQ_TIMER) {
+		lapic_eoi();
+		sched_yield();
+	}
 
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);

@@ -58,7 +58,10 @@ sched_yield(void)
 			}
 		}
 		if(curenv->env_status == ENV_RUNNING) {
-			return;
+			env_run(curenv);
+			// 注意这里不能够return 应该调用env_run来重新启动当前进程
+			// 由于这里是在中断里面的,所以curenv的tf字段中保存着中断时的断点
+			// 使用env_run正好可以根据该断点实现中断的返回
 		}
 	}
 
@@ -107,7 +110,7 @@ sched_halt(void)
 		"pushl $0\n"
 		"pushl $0\n"
 		// Uncomment the following line after completing exercise 13
-		//"sti\n"
+		"sti\n"
 		"1:\n"
 		"hlt\n"
 		"jmp 1b\n"
