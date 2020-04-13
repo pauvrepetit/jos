@@ -119,6 +119,14 @@ env_init(void)
 {
 	// Set up envs array
 	// LAB 3: Your code here.
+	// 初始化进程列表(进程被称之为env)
+	// 首先全部置0，然后修改其中的env_link字段将每个进程块连接起来
+	int i = 0;
+	memset(envs, 0, sizeof(struct Env) * NENV);
+	for(; i < NENV - 1; i++) {
+		envs[i].env_link = &envs[i + 1];
+	}
+	env_free_list = envs;
 
 	// Per-CPU part of the initialization
 	env_init_percpu();
@@ -182,6 +190,15 @@ env_setup_vm(struct Env *e)
 	//    - The functions in kern/pmap.h are handy.
 
 	// LAB 3: Your code here.
+	// 对于所有的进程，其虚地址空间在UTOP以上的部分(除了从UVPT开始的1024 * 4k的空间)都是相同的
+	// 那么在进程e的虚地址空间中,UTOP以上的页在一级页表中内容都可以直接拷贝kern_pgdir中的内容,
+	// 这样,所有的进程都使用共享的二级页表,也就使用同样的UTOP以上的物理地址空间
+	// 这里我们将UTOP以上的内存对应的一级页表中的内容拷贝到e的pgdir中
+	// 在后面将会把其中UVPT部分的内容修改掉
+	// 事实上,UVPT被用于指向一级页表自身
+	e->env_pgdir = page2kva(p);
+	p->pp_ref++;
+	memcpy(&e->env_pgdir[PDX(UTOP)], &kern_pgdir[PDX(UTOP)], PGSIZE - PDX(UTOP) * 4);
 
 	// UVPT maps the env's own page table read-only.
 	// Permissions: kernel R, user R
@@ -247,6 +264,8 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 
 	// Enable interrupts while in user mode.
 	// LAB 4: Your code here.
+	// 当系统进入用户进程的时候,我们需要允许外部中断
+	e->env_tf.tf_eflags |= FL_IF;
 
 	// Clear the page fault handler until user installs one.
 	e->env_pgfault_upcall = 0;
@@ -279,6 +298,21 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//   'va' and 'len' values that are not page-aligned.
 	//   You should round va down, and round (va + len) up.
 	//   (Watch out for corner-cases!)
+
+	// 这里我们需要分配从虚地址va开始的长度为len的内存空间
+	// 由于我们只能按页分配内存,因此我们需要将地址开始位置va向下对齐,将结束的位置va+len向上对齐
+	// 然后分配这么多的内存,然后修改页表将分配的物理页映射到相应的虚拟地址处
+	// 注意,此处分配的物理页在物理内存中并不一定是连续的,他们只是在虚地址空间中连续
+
+	void *va_down = ROUNDDOWN(va, PGSIZE);
+	size_t len_round = ROUNDUP(va + len, PGSIZE) - va_down;
+
+	int i = 0;
+	for(; i < (len_round >> PGSHIFT); i++) {
+		struct PageInfo *pp = page_alloc(ALLOC_ZERO);
+		page_insert(e->env_pgdir, pp, va_down, PTE_P | PTE_U | PTE_W);
+		va_down += 4096;
+	}
 }
 
 //
@@ -336,10 +370,50 @@ load_icode(struct Env *e, uint8_t *binary)
 
 	// LAB 3: Your code here.
 
+	// 这里需要将binary处的elf格式的镜像加载到进程e的内存空间中
+	// 对binary处的镜像的读取可以参考boot/main.c中的读取方法
+	// 对于其中每一个需要加载到内存中的段,我们为其分配相应的内存,然后将数据拷贝到该内存区域中
+	// 此处需要注意,从binary中读取到的虚地址p_va是数据在进程e的内存空间中的虚地址
+	// 而此时我们使用的内存空间是kern_pgdir,因此需要进行相应的转换
+	// 如region_alloc的注释中写的,它分配的物理页在物理内存中并不一定连续(事实上,由于空闲物理页链表的创建方式
+	// 我们调用之前编写的分配物理页函数得到的物理页几乎肯定是不连续的,即使页与页之间是连续的,它们的分配顺序也是
+	// 反过来的),所以我们不能直接找到p_va对应与kern_pgdir中的虚地址,然后就使用memset向该地址处写入数据
+	// 为了保证所以的数据都写入了正确的位置,我们按字节逐个的写入内存中
+
+	// 这里一定要注意一个问题,就是,我们不能够修改binary指向的内存空间的数据
+	// 开始的时候不小心写了一句ph->p_va++,这个实际上是会修改binary里的数据的,这导致下一次创建进程的时候
+	// 再读这个binary的数据就不对了
+	struct Proghdr *ph, *eph;
+	if(((struct Elf *)binary)->e_magic != ELF_MAGIC)
+		panic("binary's e_magic != ELF_MAGIC\n");
+	
+	ph = (struct Proghdr *)(binary + ((struct Elf *)binary)->e_phoff);
+	eph = ph + ((struct Elf *)binary)->e_phnum;
+
+	for(; ph < eph; ph++) {
+		if(ph->p_type != ELF_PROG_LOAD || ph->p_filesz > ph->p_memsz)
+			continue;
+		
+		uint32_t va = ph->p_va;
+		region_alloc(e, (void *)va, ph->p_memsz);
+		physaddr_t paddr = PTE_ADDR(*pgdir_walk(e->env_pgdir, (void *)va, 0));
+		int i = 0;
+		for(; i < ph->p_filesz; i++) {
+			paddr = PTE_ADDR(*pgdir_walk(e->env_pgdir, (void *)va, 0)) + (va & 0xFFF);
+			*(uint8_t *)KADDR(paddr) = (binary + ph->p_offset)[i];
+			va++;
+		}
+	}
+	// 这里还需要将binary中的入口地址e_entry写入到进程e保存eip寄存器的位置
+	e->env_tf.tf_eip = ((struct Elf *)binary)->e_entry;
+
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
 
 	// LAB 3: Your code here.
+	// 我们还需要给进程e分配一页,作为它的栈空间,将这一页映射到(USTACKTOP - PGSIZE)的位置
+	struct PageInfo *stackPage = page_alloc(ALLOC_ZERO);
+	page_insert(e->env_pgdir, stackPage, (void *)(USTACKTOP - PGSIZE), PTE_P | PTE_U | PTE_W);
 }
 
 //
@@ -356,6 +430,13 @@ env_create(uint8_t *binary, enum EnvType type)
 
 	// If this is the file server (type == ENV_TYPE_FS) give it I/O privileges.
 	// LAB 5: Your code here.
+	// 创建新的进程,调用下面两个函数即可
+	// 首先分配一些内存用来保存进程结构,然后加载数据/代码等的镜像
+	// 看注释的内容,我们还需要设置env_type
+	struct Env *new_env;
+	env_alloc(&new_env, 0);
+	load_icode(new_env, binary);
+	new_env->env_type = type;
 }
 
 //
@@ -486,7 +567,28 @@ env_run(struct Env *e)
 	//	e->env_tf to sensible values.
 
 	// LAB 3: Your code here.
+	// 启动进程
+	// 修改进程状态、运行次数等信息
+	// 将curenv指向该进程信息块
+	// 使用lcr3修改虚地址空间
+	// 调用env_pop_tf来恢复新进程的寄存器状态,这里面将会修改eip寄存器的值来实现跳转,从而进入新进程执行
 
-	panic("env_run not yet implemented");
+	if(curenv != NULL) {
+		if(curenv->env_status == ENV_RUNNING)
+			curenv->env_status = ENV_RUNNABLE;
+	}
+	curenv = e;
+	curenv->env_status = ENV_RUNNING;
+	curenv->env_runs++;
+	lcr3(PADDR(curenv->env_pgdir));
+
+	// 释放这个锁
+	// 按照文档所说的,这里的锁应该是在进入用户态的时候释放的
+	if((curenv->env_tf.tf_cs & 3) == 3)
+		unlock_kernel();
+
+	env_pop_tf(&(curenv->env_tf));
+
+	// panic("env_run not yet implemented");
 }
 
