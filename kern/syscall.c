@@ -157,7 +157,20 @@ sys_env_set_trapframe(envid_t envid, struct Trapframe *tf)
 	// LAB 5: Your code here.
 	// Remember to check whether the user has supplied us with a good
 	// address!
-	panic("sys_env_set_trapframe not implemented");
+	// ? 什么叫做 用户提供了一个good的地址
+	// 设置运行的特权级(也就是CS寄存器的低两位)
+	// 设置允许中断 和 不允许IO(这是eflags寄存器中的几个标志位)
+	// 将更新后的寄存器状态写入到进程envid的进程信息块中
+	struct Env *env;
+	int res = envid2env(envid, &env, 1);
+	if(res < 0)
+		return res;
+	tf->tf_cs |= 3;
+	tf->tf_eflags &= ~FL_IF;
+	tf->tf_eflags &= ~FL_IOPL_MASK;
+	memcpy(&env->env_tf, tf, sizeof(struct Trapframe));
+	return res;
+	// panic("sys_env_set_trapframe not implemented");
 }
 
 // Set the page fault upcall for 'envid' by modifying the corresponding struct
@@ -502,6 +515,8 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 		return sys_exofork();
 	case SYS_env_set_status:
 		return sys_env_set_status(a1, a2);
+	case SYS_env_set_trapframe:
+		return sys_env_set_trapframe(a1, (struct Trapframe *)a2);
 	case SYS_env_set_pgfault_upcall:
 		return sys_env_set_pgfault_upcall(a1, (void *)a2);
 	case SYS_yield:

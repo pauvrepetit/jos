@@ -107,23 +107,24 @@ duppage(envid_t envid, unsigned pn)
 	// 如果页的权限(保存在其对应的二级页表中)包括PTE_W或者PTE_COW,那么我们需要将该页的权限中的可写清除并添加PTE_COW
 	// 注意到这里我们不能够直接修改本进程的页表中页表项的权限内容,因此我们可以将映射到envid进程的页再映射回本进程中
 	// 如果是只读的话,就仍然是只读权限
-	// 注意实际页表中的权限为可能包含accessed和dirty位,在作为参数传递给系统调用时,需要将这些无效位清除
+	// 注意实际页表中的权限位可能包含accessed和dirty位,在作为参数传递给系统调用时,需要将这些无效位清除
+	// 对于权限位是PTE_SHARE的内存块,我们直接使用原来的权限信息(当然要使用PTE_SYSCALL进行筛选),将该块映射到新的进程中
+	// 新进程和原进程直接共享这个内存块
 	int perm;
 	int ptePerm;
 	extern volatile pte_t uvpt[];
-
-	pte_t pte = *(uint32_t *)((uintptr_t)uvpt + (pn << 2));
-	if(pte == 0)
-		return 0;
-	ptePerm = pte & 0xfff;
+	pte_t pte = uvpt[(PDX(pn << 12) << 10) + PTX(pn << 12)];
+	ptePerm = pte & PTE_SYSCALL;
 	perm = ptePerm;
-	if(ptePerm & PTE_W || ptePerm & PTE_COW) {
+	if(ptePerm & PTE_SHARE) {
+		perm = perm;
+	} else if(ptePerm & PTE_W || ptePerm & PTE_COW) {
 		perm &= ~(PTE_W);
 		perm |= PTE_COW;
 		// 该页是write或者copy-on-write的
-	} else
+	} else {
 		perm = ptePerm;	// 该页不能write,也不是copy-on-write的
-	perm &= PTE_SYSCALL;
+	}
 	int res = sys_page_map(thisenv->env_id, (void *)(pn * PGSIZE), envid, (void *)(pn * PGSIZE), perm);
 	if(res != 0)
 		panic("sys_page_map: %e\n", res);
@@ -171,17 +172,25 @@ fork(void)
 	}
 
 	uint8_t *addr;
-	extern unsigned char end[];	// end 是由链接器产生的 指向bss段的段尾 并不一定是4k对齐的
-	// 从UTEXT到end这部分内存就是当前进程正在使用的内存(除了高地址位置的栈以外)
-	// 首先对这部分内存做duppage的操作
-	for(addr = (uint8_t *)UTEXT; addr < end; addr += PGSIZE) {
+	// 我们还是对整个内存空间进行扫描,来找到当前进程拥有的所有的内存块
+	// 我们遍历整个页表就可以实现这个功能
+	// 由于很多情况下一级页表的内容就为空了,这是不需要遍历二级页表,所以其实应该不会花上太多的时间
+	// 这里只遍历到USTACKTOP的位置,再往上就是异常栈空间和内核空间了
+	// 这里我们就已经把正常栈的空间给映射到了新的进程中
+	for(addr = (uint8_t *)UTEXT; addr < (uint8_t *)USTACKTOP;) {
+		extern volatile pte_t uvpd[];
+		extern volatile pte_t uvpt[];
+		if(uvpd[PDX(addr)] == 0) {
+			addr += PTSIZE;
+			continue;
+		}
+		if(uvpt[(PDX(addr) << 10) + PTX(addr)] == 0) {
+			addr += PGSIZE;
+			continue;
+		}
 		duppage(new_env_id, (uint32_t)addr >> PGSHIFT);
+		addr += PGSIZE;
 	}
-
-	// 将父进程的运行时栈(非异常栈)映射到子进程中
-	// 这里的addr是局部变量,它保存在本地栈中,由于我们的进程其实只有一个页作为栈,那么就把&addr这个值做4k对齐后
-	// 就可以得到栈的虚地址
-	duppage(new_env_id, (uint32_t)(ROUNDDOWN(&addr, PGSIZE)) >> PGSHIFT);
 
 	// 然后我们需要为其分配一个异常栈
 	// 然后为子进程设置异常处理函数

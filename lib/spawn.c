@@ -302,6 +302,28 @@ static int
 copy_shared_pages(envid_t child)
 {
 	// LAB 5: Your code here.
+	// 这是在spawn中实现对所有PTE_SHARE的页在子进程中的映射
+	uint8_t *addr = 0;
+	extern volatile pte_t uvpd[];
+	extern volatile pte_t uvpt[];
+	pte_t pte;
+	for(; addr < (uint8_t *)USTACKTOP;) {
+		if(uvpd[PDX(addr)] == 0) {
+			addr += PTSIZE;
+			continue;
+		}
+		pte = uvpt[(PDX(addr) << 10) + PTX(addr)];
+		if(pte == 0) {
+			addr += PGSIZE;
+			continue;
+		}
+
+		if(pte & PTE_SHARE) {
+			sys_page_map(0, addr, child, addr, pte & PTE_SYSCALL);
+		}
+
+		addr += PGSIZE;
+	}
 	return 0;
 }
 

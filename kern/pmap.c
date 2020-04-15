@@ -198,7 +198,8 @@ mem_init(void)
 	// 将pages对应的物理地址映射到UPAGES这个虚拟地址的位置上
 	// pages本身是一个kernel virtual address，我们取它的实地址，然后做映射。
 	size_t roundup_pages_size = ROUNDUP(npages*sizeof(struct PageInfo), PGSIZE);
-	boot_map_region(kern_pgdir, UPAGES, roundup_pages_size, PADDR(pages), PTE_P | PTE_W);
+	// 这里映射的地址空间 应该是后续要被所有进程共享访问的 所以还需要添加PTE_U的权限
+	boot_map_region(kern_pgdir, UPAGES, roundup_pages_size, PADDR(pages), PTE_P | PTE_W | PTE_U);
 
 	//////////////////////////////////////////////////////////////////////
 	// Map the 'envs' array read-only by the user at linear address UENVS

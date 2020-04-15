@@ -437,6 +437,9 @@ env_create(uint8_t *binary, enum EnvType type)
 	env_alloc(&new_env, 0);
 	load_icode(new_env, binary);
 	new_env->env_type = type;
+	// 如果是文件服务进程 那么给它设置可以访问IO的权限位
+	if(type == ENV_TYPE_FS)
+		new_env->env_tf.tf_eflags |= FL_IOPL_3;
 }
 
 //

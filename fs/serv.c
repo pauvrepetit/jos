@@ -214,7 +214,17 @@ serve_read(envid_t envid, union Fsipc *ipc)
 		cprintf("serve_read %08x %08x %08x\n", envid, req->req_fileid, req->req_n);
 
 	// Lab 5: Your code here:
-	return 0;
+	// 这就是读文件 然后把读到的文件内容写到那个 要读取文件的进程 在IPC时发过来的共享内存块中
+	// 然后更新该文件当前的seek(也就是当前读/写指针相对于文件头的位置)
+	struct OpenFile *po;
+	int res = openfile_lookup(envid, req->req_fileid, &po);
+	if(res < 0)
+		return res;
+	res = file_read(po->o_file, ret->ret_buf, req->req_n, po->o_fd->fd_offset);
+	if(res < 0)
+		return res;
+	po->o_fd->fd_offset += res;
+	return res;
 }
 
 
@@ -229,7 +239,18 @@ serve_write(envid_t envid, struct Fsreq_write *req)
 		cprintf("serve_write %08x %08x %08x\n", envid, req->req_fileid, req->req_n);
 
 	// LAB 5: Your code here.
-	panic("serve_write not implemented");
+	// 这是写文件
+	// 同样要更新文件的seek值
+	struct OpenFile *po;
+	int res = openfile_lookup(envid, req->req_fileid, &po);
+	if(res < 0)
+		return res;
+	res = file_write(po->o_file, req->req_buf, req->req_n, po->o_fd->fd_offset);
+	if(res < 0)
+		return res;
+	po->o_fd->fd_offset += res;
+	return res;
+	// panic("serve_write not implemented");
 }
 
 // Stat ipc->stat.req_fileid.  Return the file's struct Stat to the
