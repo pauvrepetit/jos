@@ -23,8 +23,28 @@ int32_t
 ipc_recv(envid_t *from_env_store, void *pg, int *perm_store)
 {
 	// LAB 4: Your code here.
-	panic("ipc_recv not implemented");
-	return 0;
+	// 调用sys_ipc_recv准备接收数据 接收到数据后,将其存储到相应的内存空间中
+	int res;
+	if(pg == NULL)
+		res = sys_ipc_recv((void *)(UTOP + PGSIZE));
+	else
+		res =sys_ipc_recv(pg);
+	
+	if(res != 0) {
+		if(from_env_store != NULL)
+			*from_env_store = 0;
+		if(perm_store != NULL)
+			*perm_store = 0;
+		return res;
+	}
+
+	if(from_env_store != NULL)
+		*from_env_store = thisenv->env_ipc_from;
+	if(perm_store != NULL)
+		*perm_store = thisenv->env_ipc_perm;
+
+	// panic("ipc_recv not implemented");
+	return thisenv->env_ipc_value;
 }
 
 // Send 'val' (and 'pg' with 'perm', if 'pg' is nonnull) to 'toenv'.
@@ -39,7 +59,22 @@ void
 ipc_send(envid_t to_env, uint32_t val, void *pg, int perm)
 {
 	// LAB 4: Your code here.
-	panic("ipc_send not implemented");
+	// 使用一个循环 不断的尝试项to_env进程发送数据 直到发送成功-返回 或者遇到不可修复的错误-panic
+	int res;
+	if(pg == NULL)
+		pg = (void *)(UTOP + PGSIZE);
+	while(1) {
+		res = sys_ipc_try_send(to_env, val, pg, perm);
+		if(res == 0)
+			return;
+		if(res == -E_IPC_NOT_RECV) {
+			sys_yield();
+			continue;
+		}
+		panic("sys_ipc_try_send: %e", res);
+	}
+
+	// panic("ipc_send not implemented");
 }
 
 // Find the first environment of the given type.  We'll use this to

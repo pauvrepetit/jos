@@ -141,7 +141,15 @@ devfile_write(struct Fd *fd, const void *buf, size_t n)
 	// remember that write is always allowed to write *fewer*
 	// bytes than requested.
 	// LAB 5: Your code here
-	panic("devfile_write not implemented");
+	// 这是在要写文件的进程中调用的函数,根据传入的参数,设置IPC时的数据,然后调用fsipc将数据通过IPC发送到文件服务进程
+	fsipcbuf.write.req_fileid = fd->fd_file.id;
+	fsipcbuf.write.req_n = n;
+	memcpy(fsipcbuf.write.req_buf, buf, n);
+
+	int res = fsipc(FSREQ_WRITE, NULL);
+	return res;
+
+	// panic("devfile_write not implemented");
 }
 
 static int

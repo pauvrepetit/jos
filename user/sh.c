@@ -55,7 +55,18 @@ again:
 			// then close the original 'fd'.
 
 			// LAB 5: Your code here.
-			panic("< redirection not implemented");
+			// 这是实现'<'的重定向功能
+			// 其实就是把文件打开,然后将它挂到文件描述符0上(0就表示标准输入了)
+			if((fd = open(t, O_RDONLY)) < 0) {
+				cprintf("open %s for read: %e", t, fd);
+				exit();
+			}
+
+			if(fd != 0) {
+				dup(fd, 0);
+				close(fd);
+			}
+			// panic("< redirection not implemented");
 			break;
 
 		case '>':	// Output redirection

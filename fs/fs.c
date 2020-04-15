@@ -62,7 +62,17 @@ alloc_block(void)
 	// super->s_nblocks blocks in the disk altogether.
 
 	// LAB 5: Your code here.
-	panic("alloc_block not implemented");
+	// 遍历位视图,找到一个空块,修改位视图,将该空块标记为已使用
+	// 相当于分配了一个磁盘块
+	int blockno = 0;
+	for(; blockno < super->s_nblocks; blockno++) {
+		if((bitmap[blockno/32] & (1 << (blockno%32)))) {
+			bitmap[blockno/32] &= ~(1 << (blockno%32));
+			flush_block(bitmap);
+			return blockno;
+		}
+	}
+	// panic("alloc_block not implemented");
 	return -E_NO_DISK;
 }
 
@@ -134,8 +144,26 @@ fs_init(void)
 static int
 file_block_walk(struct File *f, uint32_t filebno, uint32_t **ppdiskbno, bool alloc)
 {
-       // LAB 5: Your code here.
-       panic("file_block_walk not implemented");
+    // LAB 5: Your code here.
+	// 这个函数是 找到文件f的第filebno块的块号在文件信息块中存放位置的指针
+	if(filebno >= NDIRECT + NINDIRECT)
+		return -E_INVAL;
+	if(filebno < NDIRECT) {
+		*ppdiskbno = &f->f_direct[filebno];
+		return 0;
+	}
+	// 现在 filebno是大于NDIRECT的,ppdiskbno应该指向二级索引中的一块了
+	if(f->f_indirect == 0) {
+		if(alloc == 0)
+			return -E_NOT_FOUND;
+		int blockno = alloc_block();
+		if(blockno < 0)
+			return -E_NO_DISK;
+		f->f_indirect = blockno;
+	}
+	*ppdiskbno = &((uint32_t *)diskaddr(f->f_indirect))[filebno - NDIRECT];
+	return 0;
+    // panic("file_block_walk not implemented");
 }
 
 // Set *blk to the address in memory where the filebno'th
@@ -149,8 +177,23 @@ file_block_walk(struct File *f, uint32_t filebno, uint32_t **ppdiskbno, bool all
 int
 file_get_block(struct File *f, uint32_t filebno, char **blk)
 {
-       // LAB 5: Your code here.
-       panic("file_get_block not implemented");
+    // LAB 5: Your code here.
+	// 这个函数是在file_block_walk的基础上,取这个块的块号
+	// 注意的是,这个块可能不存在,那么我们需要使用alloc_block分配
+	uint32_t *diskbno;
+	int res = file_block_walk(f, filebno, &diskbno, 1);
+	*blk = NULL;
+	if(res == 0) {
+		if(*diskbno == 0) {
+			int newblk = alloc_block();
+			if(newblk < 0)
+				return -E_NO_DISK;
+			*diskbno = newblk;
+		}
+		*blk = diskaddr(*diskbno);
+	}
+	return res;
+    // panic("file_get_block not implemented");
 }
 
 // Try to find a file named "name" in dir.  If so, set *file to it.

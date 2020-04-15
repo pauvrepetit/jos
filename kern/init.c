@@ -49,6 +49,8 @@ i386_init(void)
 
 	// Acquire the big kernel lock before waking up APs
 	// Your code here:
+	// 上锁
+	lock_kernel();
 
 	// Starting non-boot CPUs
 	boot_aps();
@@ -126,9 +128,12 @@ mp_main(void)
 	// only one CPU can enter the scheduler at a time!
 	//
 	// Your code here:
+	// 上锁 调用进程调度函数
+	lock_kernel();
+	sched_yield();
 
 	// Remove this after you finish Exercise 6
-	for (;;);
+	// for (;;);
 }
 
 /*

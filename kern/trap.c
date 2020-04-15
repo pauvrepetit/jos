@@ -71,9 +71,109 @@ void
 trap_init(void)
 {
 	extern struct Segdesc gdt[];
-
 	// LAB 3: Your code here.
+	// 设置中断描述符表 idt
+	// SETGATE有5个参数,第一个为中断描述符表的表项
+	// 第二个是一个标志位,用来表明是trap还是Interrupt,二者的区别好像在于是否运行中断嵌套,不是很清楚
+	// 第三个和第四个参数为 中断发生时,处理器跳转位置的CS和EIP,CS应该设置为GD_KT(这是内核的代码段的CS)
+	// EIP设置为入口地址,入口在trapentry.S中定义,我们用extern引用它们,这样的话函数名就是相应的入口地址
+	// 第五个参数 特权级,特权级的意思是,如果要使用int xx来产生中断信号的话,那么使用该特权级来触发中断
+	// 也就是说,这个时候中断是从设置的特权级被触发的,那么要求是我们只能用int来调用一部分特权级比当前执行的程序
+	// 更低的中断,而特权级被设置为0的中断,我们在用户态(特权级为3)时是不能用int来触发的
+	// 那么对应硬件中断而言,这个特权级对中断源就不会有什么限制,但是中断处理中应该是将这个值作为中断源的特权级
+	// 这个特权级要怎么设置,其实还是不是很清楚,可能在intel的手册里面有吧,但是intel的指令集的手册是在是太长了...
+	extern void divide_trap(void);
+	SETGATE(idt[0], 0, GD_KT, divide_trap, 0);
 
+	extern void debug_trap(void);
+	SETGATE(idt[1], 0, GD_KT, debug_trap, 0);
+	
+	extern void nmi_trap(void);
+	SETGATE(idt[2], 0, GD_KT, nmi_trap, 0);
+
+	extern void breakpoint_trap(void);
+	SETGATE(idt[3], 1, GD_KT, breakpoint_trap, 3);
+
+	extern void overflow_trap(void);
+	SETGATE(idt[4], 1, GD_KT, overflow_trap, 0);
+
+	extern void bound_trap(void);
+	SETGATE(idt[5], 0, GD_KT, bound_trap, 0);
+
+	extern void illegal_trap(void);
+	SETGATE(idt[6], 0, GD_KT, illegal_trap, 0);
+
+	extern void device_trap(void);
+	SETGATE(idt[7], 0, GD_KT, device_trap, 0);
+
+	extern void double_fault_trap(void);
+	SETGATE(idt[8], 0, GD_KT, double_fault_trap, 0);
+
+	extern void task_switch_trap(void);
+	SETGATE(idt[10], 0, GD_KT, task_switch_trap, 0);
+
+	extern void seg_trap(void);
+	SETGATE(idt[11], 0, GD_KT, seg_trap, 0);
+
+	extern void stack_trap(void);
+	SETGATE(idt[12], 0, GD_KT, stack_trap, 0);
+
+	extern void gp_trap(void);
+	SETGATE(idt[13], 0, GD_KT, gp_trap, 0);
+
+	extern void page_fault_trap(void);
+	SETGATE(idt[14], 0, GD_KT, page_fault_trap, 0);
+
+	extern void fp_error_trap(void);
+	SETGATE(idt[16], 0, GD_KT, fp_error_trap, 0);
+
+	extern void align_trap(void);
+	SETGATE(idt[17], 0, GD_KT, align_trap, 0);
+
+	extern void machine_trap(void);
+	SETGATE(idt[18], 0, GD_KT, machine_trap, 0);
+
+	extern void simd_trap(void);
+	SETGATE(idt[19], 0, GD_KT, simd_trap, 0);
+
+	extern void syscall_trap(void);
+	SETGATE(idt[48], 0, GD_KT, syscall_trap, 3);
+	// 这里的特权级需要设置为3
+
+	extern void irq_trap0(void);
+	extern void irq_trap1(void);
+	extern void irq_trap2(void);
+	extern void irq_trap3(void);
+	extern void irq_trap4(void);
+	extern void irq_trap5(void);
+	extern void irq_trap6(void);
+	extern void irq_trap7(void);
+	extern void irq_trap8(void);
+	extern void irq_trap9(void);
+	extern void irq_trap10(void);
+	extern void irq_trap11(void);
+	extern void irq_trap12(void);
+	extern void irq_trap13(void);
+	extern void irq_trap14(void);
+	extern void irq_trap15(void);
+
+	SETGATE(idt[IRQ_OFFSET + 0], 0, GD_KT, irq_trap0, 0);
+	SETGATE(idt[IRQ_OFFSET + 1], 0, GD_KT, irq_trap1, 0);
+	SETGATE(idt[IRQ_OFFSET + 2], 0, GD_KT, irq_trap2, 0);
+	SETGATE(idt[IRQ_OFFSET + 3], 0, GD_KT, irq_trap3, 0);
+	SETGATE(idt[IRQ_OFFSET + 4], 0, GD_KT, irq_trap4, 0);
+	SETGATE(idt[IRQ_OFFSET + 5], 0, GD_KT, irq_trap5, 0);
+	SETGATE(idt[IRQ_OFFSET + 6], 0, GD_KT, irq_trap6, 0);
+	SETGATE(idt[IRQ_OFFSET + 7], 0, GD_KT, irq_trap7, 0);
+	SETGATE(idt[IRQ_OFFSET + 8], 0, GD_KT, irq_trap8, 0);
+	SETGATE(idt[IRQ_OFFSET + 9], 0, GD_KT, irq_trap9, 0);
+	SETGATE(idt[IRQ_OFFSET + 10], 0, GD_KT, irq_trap10, 0);
+	SETGATE(idt[IRQ_OFFSET + 11], 0, GD_KT, irq_trap11, 0);
+	SETGATE(idt[IRQ_OFFSET + 12], 0, GD_KT, irq_trap12, 0);
+	SETGATE(idt[IRQ_OFFSET + 13], 0, GD_KT, irq_trap13, 0);
+	SETGATE(idt[IRQ_OFFSET + 14], 0, GD_KT, irq_trap14, 0);
+	SETGATE(idt[IRQ_OFFSET + 15], 0, GD_KT, irq_trap15, 0);
+	
 	// Per-CPU setup 
 	trap_init_percpu();
 }
@@ -106,21 +206,32 @@ trap_init_percpu(void)
 	// user space on that CPU.
 	//
 	// LAB 4: Your code here:
+	// 为每个CPU初始化他们各自的TSS和IDT
+	// IDT的设置其实是一样的,都是上面trip_init函数中写的那样
+	// TSS的设置和单处理器时有所不同(其实单处理器时的状态就是cpu_id为0时的设置方法)
+	// TSS应该是GDT中的一些项,每个CPU的TSS都对应与GDT中的一个项,这个项的位置开始与GD_TSS0>>3的位置,
+	// 当然右移3位的目的应该是在设置一些寄存器的时候方便起见,当然,这可能也限制了我们系统能够支持的CPU的数量吧
+	// 应该最多只能够支持8个CPU
 
 	// Setup a TSS so that we get the right stack
 	// when we trap to the kernel.
-	ts.ts_esp0 = KSTACKTOP;
-	ts.ts_ss0 = GD_KD;
-	ts.ts_iomb = sizeof(struct Taskstate);
+	thiscpu->cpu_ts.ts_esp0 = KSTACKTOP - (KSTKSIZE + KSTKGAP) * thiscpu->cpu_id;
+	thiscpu->cpu_ts.ts_ss0 = GD_KD;
+	thiscpu->cpu_ts.ts_iomb = sizeof(struct Taskstate);
+	// ts.ts_esp0 = KSTACKTOP;
+	// ts.ts_ss0 = GD_KD;
+	// ts.ts_iomb = sizeof(struct Taskstate);
 
 	// Initialize the TSS slot of the gdt.
-	gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&ts),
-					sizeof(struct Taskstate) - 1, 0);
-	gdt[GD_TSS0 >> 3].sd_s = 0;
+	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id] = SEG16(STS_T32A, (uint32_t) (&(thiscpu->cpu_ts)), sizeof(struct Taskstate) - 1, 0);
+	gdt[(GD_TSS0 >> 3) + thiscpu->cpu_id].sd_s = 0;
+	// gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&ts),
+	// 				sizeof(struct Taskstate) - 1, 0);
+	// gdt[GD_TSS0 >> 3].sd_s = 0;
 
 	// Load the TSS selector (like other segment selectors, the
 	// bottom three bits are special; we leave them 0)
-	ltr(GD_TSS0);
+	ltr(GD_TSS0 + (thiscpu->cpu_id << 3));
 
 	// Load the IDT
 	lidt(&idt_pd);
@@ -177,6 +288,19 @@ trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
 	// LAB 3: Your code here.
+	// 这里应该是要根据tf中的内容判断中断的类型,然后作出相应的处理
+	// 我们在这先直接打印相关的信息然后终止该进程
+	// 后续在根据需求添加具体的处理程序
+	// 这里添加了对几个中断的特殊处理
+	// 页错误、断点中断、系统调用
+	if(tf->tf_trapno == T_PGFLT)
+		page_fault_handler(tf);
+	else if(tf->tf_trapno == T_BRKPT)
+		monitor(tf);
+	else if(tf->tf_trapno == T_SYSCALL) {
+		tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax, tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx, tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
+		return;
+	}
 
 	// Handle spurious interrupts
 	// The hardware sometimes raises these because of noise on the
@@ -190,6 +314,11 @@ trap_dispatch(struct Trapframe *tf)
 	// Handle clock interrupts. Don't forget to acknowledge the
 	// interrupt using lapic_eoi() before calling the scheduler!
 	// LAB 4: Your code here.
+	// 处理时钟中断
+	if(tf->tf_trapno == IRQ_OFFSET + IRQ_TIMER) {
+		lapic_eoi();
+		sched_yield();
+	}
 
 	// Add time tick increment to clock interrupts.
 	// Be careful! In multiprocessors, clock interrupts are
@@ -199,6 +328,15 @@ trap_dispatch(struct Trapframe *tf)
 
 	// Handle keyboard and serial interrupts.
 	// LAB 5: Your code here.
+	// 处理来自键盘/串口 的输入
+	if(tf->tf_trapno == IRQ_OFFSET + IRQ_KBD) {
+		kbd_intr();
+		return;
+	}
+	if(tf->tf_trapno == IRQ_OFFSET + IRQ_SERIAL) {
+		serial_intr();
+		return;
+	}
 
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);
@@ -236,7 +374,9 @@ trap(struct Trapframe *tf)
 		// Acquire the big kernel lock before doing any
 		// serious kernel work.
 		// LAB 4: Your code here.
+		// 上锁
 		assert(curenv);
+		lock_kernel();
 
 		// Garbage collect if current enviroment is a zombie
 		if (curenv->env_status == ENV_DYING) {
@@ -281,6 +421,10 @@ page_fault_handler(struct Trapframe *tf)
 	// Handle kernel-mode page faults.
 
 	// LAB 3: Your code here.
+	// 如果是内核态发生page faults,那么直接panic
+	if((tf->tf_cs & 3) != 3) {
+		panic("kernel-mode page faults\n");
+	}
 
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.
@@ -315,6 +459,56 @@ page_fault_handler(struct Trapframe *tf)
 	//   (the 'tf' variable points at 'curenv->env_tf').
 
 	// LAB 4: Your code here.
+	// 这里需要构建正确的栈结构来实现程序的跳转.
+	// 我们将需要压入异常栈的数据使用异常栈的指针送入到异常栈中
+	// 然后我们使用env_run函数实现程序的跳转
+	// 在跳转的过程中,我们需要实现栈的切换(即修改esp)和程序地址的切换(即修改eip)
+	// 因此我们需要把正确的esp和eip值设置到该进程信息块的tf字段中(该字段保存了进程下次启动时的各个寄存器的值)
+	uintptr_t esp = UXSTACKTOP;
+	if(curenv->env_pgfault_upcall != NULL) {
+		// 表示 该进程存在page fault的处理程序
+		// 如果没有分配异常堆栈 或者异常堆栈不能访问 那么就杀死这个进程
+		user_mem_assert(curenv, (void *)(UXSTACKTOP - 4), PGSIZE, PTE_P);
+		if(tf->tf_esp < UXSTACKTOP && tf->tf_esp >= (UXSTACKTOP - PGSIZE)) {
+			// 说明 我们是在异常处理时出现page fault,然后到这里来的
+			// 这种情况下,我们需要检查在向异常堆栈中写入数据的时候是否会溢出
+			user_mem_assert(curenv, (void *)(tf->tf_esp - 56), 56, PTE_P);
+			esp = tf->tf_esp - 4;	// 空出32bit的部分
+			*(int *)esp = 0;
+		}
+		esp -= 4;
+		*(int *)esp = tf->tf_esp;
+		esp -= 4;
+		*(int *)esp = tf->tf_eflags;
+		esp -= 4;
+		*(int *)esp = tf->tf_eip;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_eax;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_ecx;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_edx;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_ebx;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_oesp;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_ebp;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_esi;
+		esp -= 4;
+		*(int *)esp = tf->tf_regs.reg_edi;
+		esp -= 4;
+		*(int *)esp = tf->tf_err;
+		esp -= 4;
+		*(int *)esp = fault_va;
+		// 上面完成了异常堆栈数据的填入 下面我们修改env的tf字段中断相关寄存器 实现跳转
+		tf->tf_eip = (uintptr_t)curenv->env_pgfault_upcall;
+		tf->tf_esp = esp;
+
+		// 使用env_run来实现跳转 env_run会根据我们上面设置的tf_eip和tf_esp来实现程序流程的跳转和堆栈的切换
+		env_run(curenv);
+	}
 
 	// Destroy the environment that caused the fault.
 	cprintf("[%08x] user fault va %08x ip %08x\n",

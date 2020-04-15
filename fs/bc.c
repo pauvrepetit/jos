@@ -48,6 +48,14 @@ bc_pgfault(struct UTrapframe *utf)
 	// the disk.
 	//
 	// LAB 5: you code here:
+	// 我们将外存的数据一对一的映射到内存空间中,当访问该内存空间中的地址时,如果发生了page fault的话
+	// 就意味着我们要访问磁盘 但是现在磁盘上的数据还没有拷贝到内存中,那么我们在这里从磁盘读取该地址对应的一个块的数据
+	// 分配一个磁盘块,将数据写入到该块中
+	// 注意ide_read的单位是扇区,一个扇区大小为512Bytes,一个内存块为4KBytes,因此需要读取8个扇区的磁盘
+	addr = ROUNDDOWN(addr, PGSIZE);
+	if((r = sys_page_alloc(thisenv->env_id, addr, PTE_U | PTE_P | PTE_W)) < 0)
+		panic("in bc_pgfault, sys_page_alloc: %e", r);
+	ide_read(blockno * 8, addr, 8);
 
 	// Clear the dirty bit for the disk block page since we just read the
 	// block from disk
@@ -77,7 +85,16 @@ flush_block(void *addr)
 		panic("flush_block of bad va %08x", addr);
 
 	// LAB 5: Your code here.
-	panic("flush_block not implemented");
+	// 这里是将内存中的磁盘映射写回到外存中
+	int r;
+	addr = ROUNDDOWN(addr, PGSIZE);
+	if(va_is_mapped(addr) && va_is_dirty(addr)) {
+		ide_write(blockno * 8, addr, 8);
+		if((r = sys_page_map(0, addr, 0, addr, uvpt[PGNUM(addr)] & PTE_SYSCALL)) < 0) {
+			panic("in bc_pgfault, sys_page_map: %e", r);
+		}
+	}
+	// panic("flush_block not implemented");
 }
 
 // Test that the block cache works, by smashing the superblock and
